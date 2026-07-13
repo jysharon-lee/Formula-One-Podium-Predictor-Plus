@@ -1,0 +1,11 @@
+cache/
+data/raw/*.csv
+data/raw/*.parquet
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store
+models/*.pkl
+models/*.joblib

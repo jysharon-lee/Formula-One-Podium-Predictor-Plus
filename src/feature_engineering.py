@@ -11,6 +11,7 @@ data lands, you're filling in logic, not designing from scratch.
 
 import pandas as pd
 import numpy as np
+import os
 
 
 # ---------------------------------------------------------------------------
@@ -261,20 +262,83 @@ def calculate_tire_degradation(laps_df, compound):
 # ---------------------------------------------------------------------------
 
 def build_feature_table():
-    """TODO: the main function that ties everything above together into one
-    clean table — one row per driver per race, every feature column from
-    PROJECT_SCOPE.md Section 4, ready to feed into the race outcome model.
+    """Build the final modeling dataset — one row per driver per race, every
+    feature from PROJECT_SCOPE.md Section 4, ready to feed into the race
+    outcome model.
 
-    Suggested order once you're filling this in:
-    1. Load combined laps/results/weather
-    2. Add regulation_era column
-    3. Loop through each race, calculate recent_form / team_pace_trend /
-       circuit_history / weather features for every driver
-    4. Save the final table to data/processed/features.parquet
+    Saves the result to data/processed/features.parquet.
     """
-    raise NotImplementedError("Fill in once Steps A-C above are implemented")
+    print("Loading combined datasets...")
+    results = load_all_results()
+    qualifying = load_all_qualifying()
+    weather = load_all_weather()
+    circuit_lookup = load_circuit_lookup()
+
+    print("\nPrecomputing qualifying gaps (one-time cost)...")
+    gap_table = precompute_qualifying_gaps(qualifying)
+
+    # Build a season/round -> circuit_name lookup dict for fast access inside the loop
+    round_to_circuit = circuit_lookup.set_index(["season", "round"])["circuit_name"].to_dict()
+
+    print("\nBuilding feature rows...")
+    feature_rows = []
+    total = len(results)
+
+    for i, row in results.iterrows():
+        if i % 500 == 0:
+            print(f"  Processing row {i}/{total}...")
+
+        driver = row["Abbreviation"]
+        team = row["TeamName"]
+        season = row["season"]
+        round_num = row["round"]
+        grid_position = row.get("GridPosition", np.nan)
+        finishing_position = pd.to_numeric(row.get("Position"), errors="coerce")
+
+        circuit_name = round_to_circuit.get((season, round_num), None)
+
+        recent_form = calculate_recent_form(results, driver, season, round_num)
+        team_pace = calculate_team_pace_trend(gap_table, team, season, round_num)
+        circuit_hist = (
+            calculate_circuit_history(results, circuit_lookup, driver, circuit_name, season, round_num)
+            if circuit_name else np.nan
+        )
+        weather_features = get_weather_features(weather, season, round_num)
+
+        # The actual prediction target: did this driver finish in the top 3?
+        podium = 1 if pd.notna(finishing_position) and finishing_position <= 3 else 0
+
+        feature_rows.append({
+            "season": season,
+            "round": round_num,
+            "driver": driver,
+            "team": team,
+            "circuit_name": circuit_name,
+            "regulation_era": assign_regulation_era(season),
+            "grid_position": grid_position,
+            "recent_form": recent_form,
+            "team_pace_trend": team_pace,
+            "circuit_history": circuit_hist,
+            "was_wet": weather_features["was_wet"],
+            "avg_track_temp": weather_features["avg_track_temp"],
+            "avg_air_temp": weather_features["avg_air_temp"],
+            "finishing_position": finishing_position,
+            "podium": podium,
+        })
+
+    feature_table = pd.DataFrame(feature_rows)
+
+    os.makedirs("data/processed", exist_ok=True)
+    output_path = "data/processed/features.parquet"
+    feature_table.to_parquet(output_path)
+
+    print(f"\nDone. Saved {len(feature_table)} rows to {output_path}")
+    print(f"\nPodium rate: {feature_table['podium'].mean():.1%} (should be roughly 3/20 = 15%)")
+    print(f"\nMissing value counts:")
+    print(feature_table[["recent_form", "team_pace_trend", "circuit_history", "was_wet"]].isna().sum())
+
+    return feature_table
 
 
 if __name__ == "__main__":
-    print("This is a skeleton file — functions are stubbed with NotImplementedError.")
-    print("Fill in the logic once data/raw/ is fully populated from pull_season_data.py")
+    build_feature_table()

@@ -2,6 +2,8 @@ cache/
 data/raw/
 !data/raw/.gitkeep
 !data/raw/*/.gitkeep
+data/processed/*.parquet
+!data/processed/.gitkeep
 __pycache__/
 *.pyc
 .venv/

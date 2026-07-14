@@ -2,12 +2,7 @@
 Phase 2: Combine all per-race parquet files into three unified
 datasets — one for laps, one for results, one for weather.
 
-This is what src/feature_engineering.py's load_all_*() functions were
-stubbed out for. Once this runs, the NotImplementedError placeholders there
-can be replaced with a simple call into this file's output.
-
 Run locally: python src/combine_data.py
-
 """
 
 import glob
@@ -22,7 +17,7 @@ def combine_folder(raw_dir, output_path):
     print(f"Combining {len(files)} files from {raw_dir}...")
 
     if not files:
-        print(f"  WARNING: no files found in {raw_dir} ")
+        print(f"  WARNING: no files found in {raw_dir} — did the pull actually run?")
         return None
 
     dfs = []
@@ -51,6 +46,9 @@ if __name__ == "__main__":
     print("\n=== Combining weather ===")
     weather = combine_folder("data/raw/weather", "data/processed/all_weather.parquet")
 
+    print("\n=== Combining qualifying ===")
+    qualifying = combine_folder("data/raw/qualifying", "data/processed/all_qualifying.parquet")
+
     print("\n=== Summary ===")
     if laps is not None:
         print(f"Laps: {len(laps)} rows, {laps['season'].nunique()} seasons, "
@@ -59,5 +57,7 @@ if __name__ == "__main__":
         print(f"Results: {len(results)} rows")
     if weather is not None:
         print(f"Weather: {len(weather)} rows")
+    if qualifying is not None:
+        print(f"Qualifying: {len(qualifying)} rows")
 
     print("\nDone. Combined files saved in data/processed/.")

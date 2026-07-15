@@ -45,23 +45,44 @@ def filter_clean_laps(laps):
 
 
 def normalize_lap_times(clean_laps):
-    """Express each lap's time as a delta from that RACE's own best clean
-    lap — isolates tire degradation from track-to-track pace differences."""
+    """Express each lap's time as a delta from the FIELD'S median lap time
+    at that exact lap number, in that race — not just that race's single
+    best lap.
+
+    Why this is better than race-best + a linear lap_number correction:
+    subtracting the field median at each specific lap automatically removes
+    ANY shared track-level trend at that moment — fuel burn-off, track
+    drying in wet conditions, rubber being laid down — regardless of what's
+    causing it or whether it's linear. All cars experience roughly the same
+    track conditions at the same lap, so this shared trend cancels out,
+    leaving mostly car/tire-specific variation (tire age, compound, driver
+    pace) in the residual.
+
+    This is what fixed the wet/intermediate track-drying confound that a
+    simple linear lap_number term couldn't fully separate (tire age and lap
+    number are too collinear within a single wet stint, since cars rarely
+    pit mid-chaos — not enough independent variation for a linear term to
+    isolate the two effects).
+    """
+    clean_laps = clean_laps.copy()
     clean_laps["lap_time_seconds"] = clean_laps["LapTime"].dt.total_seconds()
 
-    race_best = clean_laps.groupby(["season", "round"])["lap_time_seconds"].transform("min")
-    clean_laps["lap_time_delta"] = clean_laps["lap_time_seconds"] - race_best
+    field_median_at_lap = clean_laps.groupby(
+        ["season", "round", "LapNumber"]
+    )["lap_time_seconds"].transform("median")
+
+    clean_laps["lap_time_delta"] = clean_laps["lap_time_seconds"] - field_median_at_lap
 
     return clean_laps
 
 
 def fit_degradation_curves(clean_laps, max_tyre_life=40):
-    """Fit a simple quadratic regression per compound: lap_time_delta ~ TyreLife.
-    Quadratic (not linear) because tire degradation often accelerates near
-    end-of-life ("falling off a cliff"), not just a steady linear increase.
+    """Fit lap_time_delta ~ TyreLife (quadratic), per compound.
 
-    Capped at max_tyre_life to avoid extreme outlier stints (very old tires,
-    rare strategy choices) distorting the curve for the normal operating range.
+    No longer need a separate lap_number covariate — field-median-per-lap
+    normalization already removed shared track-level trends (fuel burn,
+    track drying), so TyreLife is now the primary remaining source of
+    systematic variation in the residual.
     """
     curves = {}
     for compound in MODERN_COMPOUNDS:
@@ -74,7 +95,6 @@ def fit_degradation_curves(clean_laps, max_tyre_life=40):
             print(f"  {compound}: only {len(compound_laps)} laps — too few to fit reliably, skipping")
             continue
 
-        # Fit lap_time_delta = a*TyreLife^2 + b*TyreLife + c
         coeffs = np.polyfit(compound_laps["TyreLife"], compound_laps["lap_time_delta"], deg=2)
         curves[compound] = {
             "coefficients": coeffs,  # [a, b, c] for a*x^2 + b*x + c
@@ -83,18 +103,32 @@ def fit_degradation_curves(clean_laps, max_tyre_life=40):
         }
         print(f"  {compound}: fit on {len(compound_laps)} laps "
               f"(TyreLife range {curves[compound]['tyre_life_range']})")
+        print(f"    Coefficients (a, b, c): ({coeffs[0]:.5f}, {coeffs[1]:.5f}, {coeffs[2]:.5f})")
 
     return curves
 
 
 def predict_lap_time_delta(curves, compound, tyre_life):
     """Given a compound and tire age, predict the expected lap time delta
-    (seconds slower than that race's best lap) — this is what the pit-stop
-    simulator will call to estimate degradation cost."""
+    vs. the field's typical pace at that point in the race.
+
+    IMPORTANT: clips tyre_life to the range actually observed in the data
+    for that compound. Querying a quadratic curve outside its fitted range
+    is unreliable extrapolation, not a real prediction — this bit us
+    directly with WET tires (only observed up to 24 laps old; querying age
+    30 produced a nonsensical -5.2s "faster than fresh" result purely from
+    extrapolation instability on a small, 372-lap sample).
+    """
     if compound not in curves:
-        return np.nan
+        return np.nan, False
+
+    min_observed, max_observed = curves[compound]["tyre_life_range"]
+    was_clipped = tyre_life > max_observed or tyre_life < min_observed
+    clipped_tyre_life = max(min_observed, min(tyre_life, max_observed))
+
     a, b, c = curves[compound]["coefficients"]
-    return a * tyre_life**2 + b * tyre_life + c
+    delta = a * clipped_tyre_life**2 + b * clipped_tyre_life + c
+    return delta, was_clipped
 
 
 def main():
@@ -117,11 +151,17 @@ def main():
     print(f"\nSaved degradation curves to models/tire_degradation_curves.pkl")
 
     print(f"\n--- Sanity check: predicted lap time delta at various tire ages ---")
+    print(f"(delta is vs. the field's typical pace at that point in the race)")
+    print(f"(ages beyond each compound's OBSERVED range are marked [CLIPPED] —")
+    print(f" these are extrapolations and should not be trusted)")
+    test_ages = [1, 5, 10, 20, 30, 40]
     for compound in curves:
-        print(f"\n{compound}:")
-        for tyre_life in [1, 5, 10, 20, 30]:
-            delta = predict_lap_time_delta(curves, compound, tyre_life)
-            print(f"  Tire age {tyre_life} laps: +{delta:.3f}s vs. race best")
+        min_obs, max_obs = curves[compound]["tyre_life_range"]
+        print(f"\n{compound} (observed range: {min_obs:.0f}-{max_obs:.0f} laps):")
+        for tyre_life in test_ages:
+            delta, was_clipped = predict_lap_time_delta(curves, compound, tyre_life)
+            flag = " [CLIPPED — outside observed data, unreliable]" if was_clipped else ""
+            print(f"  Tire age {tyre_life} laps: {delta:+.3f}s vs. field median{flag}")
 
 
 if __name__ == "__main__":

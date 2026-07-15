@@ -116,3 +116,30 @@ page) should honestly reflect this — show the ~72% base rate as a reference
 point rather than presenting per-race predictions as if they were reliable,
 OR clearly label the low confidence. Presenting an unreliable model's output
 as confident would be misleading to anyone using the dashboard.
+
+## 10. System 2 (Pit-Stop Simulator) — tire degradation data quality by compound
+
+Tire degradation curves (lap_time_delta ~ TyreLife, quadratic, fit after
+removing shared track-level trends via field-median-per-lap normalization)
+have very different reliability by compound:
+
+- **SOFT, MEDIUM, HARD: solid.** Clean, monotonically increasing degradation
+  across the entire observed range (1-40 laps), 22,907 / 44,318 / 48,326
+  laps respectively. These are the reliable foundation for the simulator.
+- **INTERMEDIATE: usable, lower confidence.** Some noise mid-range (5,441
+  laps), but overall trend is still correctly upward across the full range.
+- **WET: documented as unreliable, not fixed further.** Only 372 clean laps
+  across 7 seasons — even within the observed range (2-24 laps, no
+  extrapolation involved), the fitted curve is non-monotonic (-0.03s → +0.62s
+  → -0.60s), meaning the data itself can't support a stable curve. This is a
+  genuine sample-size ceiling: wet races vary enormously race-to-race (rain
+  intensity, drying speed, standing water location) in ways 372 laps can't
+  average out. Investigated two rounds of confound-fixing (race-best
+  normalization + lap_number covariate, then field-median-per-lap
+  normalization) — neither resolved it, confirming this is a data limitation,
+  not a fixable methodology issue.
+
+**Decision:** build the pit-stop simulator on SOFT/MEDIUM/HARD (and
+INTERMEDIATE with a lower-confidence flag). If WET tire strategy ever
+surfaces in the dashboard, label it explicitly as low-confidence rather than
+presenting it with the same authority as the dry-compound predictions.

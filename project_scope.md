@@ -143,3 +143,27 @@ have very different reliability by compound:
 INTERMEDIATE with a lower-confidence flag). If WET tire strategy ever
 surfaces in the dashboard, label it explicitly as low-confidence rather than
 presenting it with the same authority as the dry-compound predictions.
+
+## 11. System 2 — same-compound refresh crossover finding, and a real cross-compound limitation
+
+Systematically scanned tire ages (10-39 laps) and simulation windows (10-60
+laps) for SOFT/MEDIUM/HARD: **same-compound tire refresh never beats the
+~22s pit stop cost, for any tested combination, on any of the three
+compounds.** This is a clean, genuine finding, not a gap — these degradation
+curves are simply too flat (under 0.5s difference across the entire
+observed tire-age range) for wear alone to ever justify a stop. This
+matches real F1 strategic knowledge: drivers pit primarily for compound
+CHANGES (switching to a genuinely faster tire) or track-position tactics
+(undercut/overcut), not because a same-type tire wore out a bit more.
+
+**Important limitation for any future compound-switch feature:** the
+field-median-per-lap normalization (Section 10) that correctly isolated
+each compound's OWN degradation trend also removed the baseline pace
+differences BETWEEN compounds — it subtracts out a shared field average
+that mixes all compounds together. This means the current curves can
+validly answer "how does SOFT degrade over its own life" but CANNOT validly
+answer "is a fresh SOFT faster than a 20-lap-old HARD" — that comparison
+would need a separate, compound-aware baseline we did not build. Any future
+cross-compound comparison feature must account for this before being added;
+using the current curves for that purpose would produce plausible-looking
+but untrustworthy numbers.
